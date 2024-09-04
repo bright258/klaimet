@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+databases
+sqlalchemy
+pandas
+numpy
+scikit-learn
+shap
+openai
+matplotlib
+seaborn
+requests
