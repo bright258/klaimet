@@ -9,11 +9,14 @@ from sqlalchemy import Table, Column, Integer, Float, DateTime, String, MetaData
 import os
 from contextlib import asynccontextmanager
 import json
+from sqlalchemy.ext.declarative import declarative_base
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./co2emissions.db")
 database = databases.Database(DATABASE_URL)
 metadata = sqlalchemy.MetaData()
+
+Base = declarative_base()
 
 emissions = Table(
     "emissions",
@@ -181,7 +184,7 @@ async def root():
         </head>
         <body>
             <div class="container">
-                <h1>Welcome to the CO2 Emissions API</h1>
+                <h1>Welcome to the CO2 Emissions API by Bright Bassey</h1>
                 <h2>Upload Emissions Data</h2>
                 <textarea id="jsonData" placeholder="Paste your JSON data here"></textarea>
                 <button onclick="uploadData()">Upload Data</button>

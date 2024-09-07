@@ -32,3 +32,13 @@ Thumbs.db
 
 # Environment variables file (if you decide to use one)
 .env
+
+# Ignore all image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.svg

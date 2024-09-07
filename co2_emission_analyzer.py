@@ -2,9 +2,20 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 import shap
-import openai
+from openai import OpenAI
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
+from api_server import Base, emissions
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from transformers import pipeline
+import random
+from datetime import datetime
 
 class CO2EmissionAnalyzer:
     def __init__(self, industry, custom_features=None):
@@ -14,6 +25,19 @@ class CO2EmissionAnalyzer:
         self.industry_benchmarks = self.load_industry_benchmarks()
         self.regulations = self.load_industry_regulations()
         self.best_practices = self.load_industry_best_practices()
+        self.engine = create_engine('sqlite:///co2emissions.db')
+        Base.metadata.bind = self.engine
+        self.DBSession = sessionmaker(bind=self.engine)
+
+        self.industry_trends = {
+            "electronic_manufacturing": [
+                "IoT integration for real-time energy monitoring",
+                "AI-driven process optimization",
+                "Adoption of circular economy principles",
+                "Increased use of biodegradable materials",
+                "Implementation of digital twins for efficiency"
+            ]
+        }
 
     def load_industry_benchmarks(self):
         benchmarks = {
@@ -50,9 +74,49 @@ class CO2EmissionAnalyzer:
         }
         return best_practices.get(self.industry, {})
 
+    def fetch_data_from_db(self):
+        session = self.DBSession()
+        emissions_data = session.query(emissions)
+        
+        data = []
+        for emission in emissions_data:
+            row = {
+                'date': emission.timestamp,
+                'co2_emissions': emission.co2_emissions,
+                'energy_consumption': emission.energy_consumption,
+                'production_volume': emission.production_volume,
+            }
+            # Add equipment data
+            # for equipment in emission.equipment:
+            #     row[f'equipment_{equipment.equipment_id}_emissions'] = co2_emissions
+            #     row[f'equipment_{equipment.equipment_id}_energy'] = equipment.energy_consumption
+            
+            # Add process data
+            # for process in emission.processes:
+            #     row[f'process_{process.process_id}_emissions'] = process.co2_emissions
+            #     row[f'process_{process.process_id}_energy'] = process.energy_consumption
+            
+            # Add energy source data
+            # for source in emission.energy_sources:
+            #     row[f'source_{source.source_id}_emissions'] = source.co2_emissions
+            #     row[f'source_{source.source_id}_energy'] = source.energy_provided
+            
+            data.append(row)
+        
+        session.close()
+        return pd.DataFrame(data)
+
     def preprocess_data(self, df):
-        df['Date'] = pd.to_datetime(df['timestamp'])
+        df['Date'] = pd.to_datetime(df['date'])
         df.set_index('Date', inplace=True)
+        df = df.drop('date', axis=1)  # Remove the original 'date' column
+        
+        # Convert all columns to numeric, replacing non-numeric values with NaN
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Drop any rows with NaN values
+        df = df.dropna()
         
         if self.industry == 'electronic_manufacturing':
             df['energy_efficiency_ratio'] = df['energy_consumption'] / df['production_volume']
@@ -70,58 +134,84 @@ class CO2EmissionAnalyzer:
         self.model.fit(X, y)
 
     def analyze_feature_importance(self, X):
-        explainer = shap.TreeExplainer(self.model)
-        shap_values = explainer.shap_values(X)
-        return shap_values
+        try:
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+            if isinstance(shap_values, list):
+                shap_values = np.array(shap_values).mean(axis=0)
+            feature_importance = dict(zip(X.columns, np.abs(shap_values).mean(0)))
+            sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+            
+            major_sources = []
+            for feature, importance in sorted_features[:3]:  # Top 3 features
+                if importance > 0.1:  # Arbitrary threshold
+                    major_sources.append((feature, importance))
+            
+            if not major_sources:
+                print("Warning: No major sources of CO2 emissions identified.")
+                major_sources.append(("No significant source", 0))
+            
+            return major_sources
+        except Exception as e:
+            print(f"Error in analyzing feature importance: {str(e)}")
+            return [("Error in analysis", 0)]
 
     def analyze_emission_sources(self, X, shap_values):
-        feature_importance = dict(zip(X.columns, np.abs(shap_values).mean(0)))
-        sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
-        
-        major_sources = []
-        for feature, importance in sorted_features[:3]:  # Top 3 features
-            if importance > 0.1:  # Arbitrary threshold
-                major_sources.append((feature, importance))
-        
-        return major_sources
+        try:
+            if isinstance(shap_values, list):
+                shap_values = np.array(shap_values).mean(axis=0)
+            feature_importance = dict(zip(X.columns, np.abs(shap_values).mean(0)))
+            sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+            
+            major_sources = []
+            for feature, importance in sorted_features[:3]:  # Top 3 features
+                if importance > 0.1:  # Arbitrary threshold
+                    major_sources.append((feature, importance))
+            
+            if not major_sources:
+                print("Warning: No major sources of CO2 emissions identified.")
+                major_sources.append(("No significant source", 0))
+            
+            return major_sources
+        except Exception as e:
+            print(f"Error in analyzing emission sources: {str(e)}")
+            return [("Error in analysis", 0)]
 
     def generate_industry_specific_recommendations(self, major_sources):
         recommendations = []
+        for source, importance in major_sources:
+            if source != "No significant source":
+                recommendations.append(f"Reduce emissions from {source}")
         
-        if self.industry == 'electronic_manufacturing':
-            for source, _ in major_sources:
-                if source == 'energy_consumption':
-                    recommendations.append("Implement energy-efficient manufacturing processes and equipment. Consider upgrading to the latest energy-efficient machinery and optimizing production schedules to reduce energy consumption during peak hours.")
-                elif source == 'production_volume':
-                    recommendations.append("Optimize production efficiency to reduce emissions per unit. Implement lean manufacturing principles and invest in automation to increase production efficiency while reducing energy consumption and waste.")
-        
-        elif self.industry == 'oil_and_gas':
-            for source, _ in major_sources:
-                if source == 'co2_emissions':
-                    recommendations.append("Implement advanced emission capture and storage technologies. Invest in carbon capture and storage (CCS) systems to significantly reduce CO2 emissions from production processes.")
-                elif source == 'energy_consumption':
-                    recommendations.append("Optimize energy usage in extraction and refining processes. Implement energy management systems and invest in more efficient equipment to reduce overall energy consumption.")
+        if not recommendations:
+            recommendations.append("Implement general energy efficiency measures")
         
         return recommendations
 
-    def refine_recommendations_with_gpt3(self, recommendations):
-        openai.api_key = 'your-openai-api-key-here'
-        
-        prompt = f"Given the following emission reduction recommendations for a {self.industry} company:\n\n"
-        for i, rec in enumerate(recommendations, 1):
-            prompt += f"{i}. {rec}\n"
-        prompt += f"\nPlease refine and expand on these recommendations, providing more specific and actionable advice for the {self.industry} industry, including potential technologies, best practices, and implementation strategies:"
-        
-        response = openai.Completion.create(
-            engine="text-davinci-002",
-            prompt=prompt,
-            max_tokens=500,
-            n=1,
-            stop=None,
-            temperature=0.7,
-        )
-        
-        refined_recommendations = response.choices[0].text.strip().split('\n')
+    def refine_recommendations_with_custom(self, recommendations):
+        industry_specific_recommendations = {
+            "electronic_manufacturing": [
+                "Implement energy-efficient manufacturing processes",
+                "Upgrade to more energy-efficient equipment",
+                "Optimize clean room energy consumption",
+                "Implement waste heat recovery systems",
+                "Use renewable energy sources for manufacturing operations",
+                "Improve supply chain sustainability",
+                "Implement a comprehensive energy management system",
+                "Conduct regular energy audits",
+                "Train employees on energy-saving practices",
+                "Invest in research and development for more energy-efficient products"
+            ]
+        }
+
+        refined_recommendations = []
+        for rec in recommendations:
+            refined_rec = f"Expand on: {rec}\n"
+            specific_recs = random.sample(industry_specific_recommendations[self.industry], 3)
+            for i, specific_rec in enumerate(specific_recs, 1):
+                refined_rec += f"  {i}. {specific_rec}\n"
+            refined_recommendations.append(refined_rec)
+
         return refined_recommendations
 
     def plot_emissions_trend(self, df):
@@ -134,12 +224,18 @@ class CO2EmissionAnalyzer:
         plt.close()
 
     def plot_major_sources(self, major_sources):
+        if not major_sources:
+            print("No major sources to plot.")
+            return
+        
         sources, importances = zip(*major_sources)
         plt.figure(figsize=(10, 6))
         plt.bar(sources, importances)
         plt.title('Major Sources of CO2 Emissions')
         plt.xlabel('Source')
         plt.ylabel('Importance')
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
         plt.savefig(f'{self.industry}_major_sources.png')
         plt.close()
 
