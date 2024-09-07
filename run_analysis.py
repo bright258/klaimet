@@ -4,24 +4,7 @@ from datetime import datetime, timedelta
 from co2_emission_analyzer import CO2EmissionAnalyzer
 import numpy as np
 import os
-os.environ["OPENAI_API_KEY"] = "***REMOVED***"
 
-def fetch_data_from_api(industry, start_date, end_date):
-    API_URL = "http://localhost:8000/emissions/"
-    API_KEY = "***REMOVED***"
-    
-    params = {
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
-        "industry": industry
-    }
-    headers = {"X-API-Key": API_KEY}
-    
-    response = requests.get(API_URL, params=params, headers=headers)
-    if response.status_code == 200:
-        return pd.DataFrame(response.json())
-    else:
-        raise Exception(f"Failed to fetch data from API. Status code: {response.status_code}")
 
 def main(industry, custom_features=None):
     # Remove or comment out this block
