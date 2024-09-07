@@ -47,7 +47,6 @@ def send_reading_to_api(sensor_data):
             print(f"Failed to send reading. Status code: {response.status_code}")
     except requests.RequestException as e:
         print(f"Error sending data to API: {e}")
-
 def main():
     print(f"Starting sensor logger for {INDUSTRY} industry")
     while True:
